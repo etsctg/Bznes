@@ -1,0 +1,84 @@
+/* ব্যবসা ম্যানেজার — Service Worker
+   এটা অ্যাপ-শেল (HTML + আলাদা CSS/JS মডিউল ফাইল + আইকন) এবং বাইরের CDN থেকে লোড হওয়া জরুরি
+   স্ক্রিপ্ট (Chart.js, Firebase SDK) — দুটোই ক্যাশ করে রাখে, যাতে একবার
+   অনলাইনে চালানোর পর অ্যাপ সত্যিকার অর্থে অফলাইনেও (ড্যাশবোর্ডের চার্টসহ)
+   ঠিকভাবে খোলে। মনে রাখবেন: ডেটা (Firebase Firestore) সিঙ্ক করতে এখনও
+   ইন্টারনেট লাগে — শুধু নতুন এন্ট্রি অফলাইনে লোকালি জমা থাকে, পরে সিঙ্ক হয়। */
+
+const CACHE_NAME = 'business-erp-shell-v22';
+const SHELL_FILES = [
+  './index.html',
+  './style.css',
+  './theme-xp.css',
+  './config.js',
+  './lib/JsBarcode.code128.min.js',
+  './js/core-data.js',
+  './js/license.js',
+  './js/dashboard.js',
+  './js/stock.js',
+  './js/sales.js',
+  './js/entry-bar.js',
+  './js/purchase.js',
+  './js/dues.js',
+  './js/expenses.js',
+  './js/reports.js',
+  './js/settings.js',
+  './js/print-share.js',
+  './js/cashbook.js',
+  './js/returns.js',
+  './js/barcode.js',
+  './js/holds.js',
+  './js/purchase-extra.js',
+  './js/boot.js',
+  './manifest.json',
+  './chart.umd.js',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-512-maskable.png'
+];
+/* Firebase SDK এখনও গুগলের CDN (gstatic.com) থেকে আসে — Chart.js এখন লোকাল ফাইল
+   হওয়ায় (chart.umd.js, উপরের SHELL_FILES-এ) সেটা নিয়ে আর কোনো CDN-নির্ভরতা নেই */
+const CDN_FILES = [
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js',
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js',
+  'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js'
+];
+
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(async cache => {
+      await cache.addAll(SHELL_FILES).catch(()=>{});
+      await Promise.all(CDN_FILES.map(url =>
+        cache.add(url).catch(err => console.warn('CDN cache করা যায়নি:', url, err))
+      ));
+    })
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+const ALL_CACHED_URLS = new Set([...SHELL_FILES.map(f => f.replace('./','')), ...CDN_FILES]);
+
+self.addEventListener('fetch', event => {
+  const url = event.request.url;
+  const isCached = [...ALL_CACHED_URLS].some(f => url.includes(f) || url === f);
+  if(!isCached){ return; }
+
+  event.respondWith(
+    fetch(event.request)
+      .then(res => {
+        const resClone = res.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, resClone));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
+  );
+});

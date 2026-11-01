@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ব্যবসা ম্যানেজার — Business ERP</title>
+<!-- PWA — এই অ্যাপকে ইনস্টলযোগ্য করে (ডেস্কটপ/মোবাইলে আইকন হিসেবে বসে) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#122924">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ব্যবসা ম্যানেজার">
+<script>
+/* থিম আগে থেকেই প্রয়োগ করা হয় (CSS আসার আগে) যাতে পেজ লোডের সময় রং ঝলক (flash) না করে */
+(function(){
+  try{
+    const saved = localStorage.getItem('erp_theme');
+    if(saved === 'light') document.documentElement.setAttribute('data-theme','light');
+    else if(String(saved).indexOf('xp') === 0) document.documentElement.setAttribute('data-theme','xp');
+  }catch(e){}
+})();
+</script>
+<!-- ফন্ট: Noto Sans Bengali — বাংলা লেখা পরিষ্কার ও সামঞ্জস্যপূর্ণ দেখানোর জন্য -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="chart.umd.js"></script>
+<!-- Firebase (free tier) — powers real multi-user shared data. See CONFIG section in <script> below. -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="theme-xp.css">
+</head>
+<body>
+
+<button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="থিম বদলান">🌙</button>
+
+<!-- ================= CONNECTING / SETUP SCREEN ================= -->
+<div id="bootScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 20% 20%, #163a32 0%, #0e1f1c 60%);padding:20px;">
+  <div class="login-box" style="max-width:520px;">
+    <div class="brand"><div class="brand-mark">৳</div><div><h1>ব্যবসা ম্যানেজার</h1><p>Smart Business ERP — Cloud সংযোগ হচ্ছে...</p></div></div>
+    <div id="bootStatus" style="margin-top:18px;font-size:13.5px;color:var(--muted);">🔄 সার্ভারের সাথে সংযোগ করা হচ্ছে...</div>
+    <div id="bootSetup" class="hidden" style="margin-top:16px;">
+      <div class="login-hint" style="line-height:1.8;">
+        ❗ এই অ্যাপ এখনো কোনো ডেটাবেসের সাথে যুক্ত নেই।<br><br>
+        এটা ঠিক করতে ফাইলের একেবারে নিচের দিকে <b>"CONFIG — এখানে আপনার Firebase তথ্য বসান"</b> অংশে গিয়ে
+        নিজের Firebase প্রজেক্টের <b>firebaseConfig</b> বসিয়ে দিন।<br><br>
+        বিস্তারিত ধাপে ধাপে নির্দেশনা চ্যাটে দেওয়া আছে।
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= দোকান-সংযোগ (Firebase Email/Password) ================= -->
+<div id="shopGate" style="display:none;">
+  <div class="login-box">
+    <div class="brand"><div class="brand-mark">৳</div><div><h1>ব্যবসা ম্যানেজার</h1><p>Smart Business ERP — নিরাপদ সংযোগ</p></div></div>
+    <h2>🔒 দোকানের সংযোগ</h2>
+    <div class="set-note" style="margin:0 0 12px;">এই ডিভাইসটি এই দোকানের ডেটাবেসের সাথে যুক্ত হচ্ছে। দোকানের মালিকের দেওয়া <b>সংযোগ-ইমেইল ও পাসওয়ার্ড</b> দিন — প্রতি ডিভাইসে একবারই লাগবে।</div>
+    <div class="field"><label>সংযোগ ইমেইল</label><input id="gateEmail" type="email" autocomplete="username" placeholder="shop@example.com"></div>
+    <div class="field"><label>সংযোগ পাসওয়ার্ড</label><input id="gatePass" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <button class="btn btn-primary" id="gateBtn" onclick="shopGateLogin()">সংযুক্ত করুন</button>
+    <div class="login-err" id="gateErr"></div>
+    <div class="login-hint">মালিকের জন্য: Firebase Console → Authentication → Users → "Add user" থেকে এই ইমেইল-পাসওয়ার্ড বানান। বিস্তারিত ধাপ সাথের <b>SECURITY_SETUP.txt</b> ফাইলে।</div>
+  </div>
+</div>
+
+<!-- ================= LOGIN ================= -->
+<div id="loginScreen">
+  <div class="login-box">
+    <div class="brand">
+      <div class="brand-mark">৳</div>
+      <div>
+        <h1>ব্যবসা ম্যানেজার</h1>
+        <p>Smart Business ERP — Sales • Stock • Accounts</p>
+      </div>
+    </div>
+    <h2>লগইন করুন</h2>
+    <div class="field">
+      <label>ইউজারনেম</label>
+      <input id="loginUser" type="text" placeholder="username">
+    </div>
+    <div class="field">
+      <label>পাসওয়ার্ড</label>
+      <input id="loginPass" type="password" placeholder="••••••••">
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">প্রবেশ করুন</button>
+    <div class="login-err" id="loginErr"></div>
+    <div class="login-hint" id="loginHint">
+      ইউজারনেম ও পাসওয়ার্ড দোকানের এডমিনের কাছ থেকে নিন।
+    </div>
+    <button class="btn btn-outline hidden" id="installBtn" style="width:100%;margin-top:10px;" onclick="triggerInstall()">📲 অ্যাপ হিসেবে ইনস্টল করুন</button>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="appScreen">
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeSidebarMobile()"></div>
+  <div class="sidebar" id="sidebarEl">
+    <div class="brand">
+      <div class="brand-mark" id="brandMark" style="width:34px;height:34px;font-size:17px;flex-shrink:0;">৳</div>
+      <div style="min-width:0;"><h1 id="brandName" style="font-size:15px;overflow-wrap:anywhere;">ব্যবসা ম্যানেজার</h1></div>
+    </div>
+    <div id="navList"></div>
+    <div class="sidebar-foot">
+      <div id="connBadge" style="font-size:11.5px;padding:6px 6px;font-weight:600;"></div>
+      <div class="app-ver">ভার্সন <b id="appVerTxt"></b></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="app-topbar">
+      <button class="hamburger-btn" onclick="toggleSidebarMobile()">☰</button>
+      <div class="tb-titles" id="tbTitles" onclick="toggleTbTitle()"><div class="tb-title" id="tbTitle">ব্যবসা ম্যানেজার</div><div class="tb-sub" id="tbSub"></div></div>
+      <div class="top-actions">
+        <span class="tb-chip" id="licChip" style="display:none;cursor:pointer;" onclick="openLicenseTab()" title="লাইসেন্স"></span>
+        <span class="tb-chip" id="connBadgeTop"></span>
+        <button class="tb-btn tb-desk" onclick="openHelp()" title="ব্যবহার নির্দেশিকা">❓<span class="tb-lbl">Help</span></button>
+        <button class="tb-btn tb-desk" onclick="openAbout()" title="অ্যাপ ও ডেভেলপার সম্পর্কে">ℹ️<span class="tb-lbl">About</span></button>
+        <button class="tb-btn tb-icon tb-desk" id="themeToggleBtn2" onclick="toggleTheme()" title="থিম বদলান">🌙</button>
+        <div class="tb-user tb-desk" title="বর্তমানে লগইন করা ইউজার">
+          <div class="brand-mark" id="userInitial">A</div>
+          <div class="tb-user-txt"><b id="curUserName">-</b><span class="role-badge" id="curUserRole">-</span></div>
+        </div>
+        <button class="tb-btn tb-logout tb-desk" onclick="logoutWithBackupCheck()" title="লগআউট">🚪<span class="tb-lbl">লগআউট</span></button>
+        <div class="tb-menu-wrap">
+          <button class="tb-btn tb-icon" id="tbMenuBtn" onclick="toggleTopMenu(event)" title="মেনু">⋮</button>
+          <div class="tb-menu" id="tbMenu"></div>
+        </div>
+      </div>
+    </div>
+    <div class="main" id="mainArea"></div>
+  </div>
+
+</div>
+
+  <!-- এই বাটনগুলো যেকোনো পেজেই দেখা যাবে — renderPage() শুধু mainArea বদলায়, এটা বদলায় না -->
+  <div class="fab-group" id="fabGroup">
+    <button class="fab-btn fab-purchase hidden" id="fabPurchase" onclick="openPurchaseModal()" title="নতুন ক্রয় (F3)">
+      <span class="fab-ic">🛒</span><span class="fab-label">নতুন ক্রয়</span><span class="fab-key">F3</span>
+    </button>
+    <button class="fab-btn fab-sale hidden" id="fabSale" onclick="openSaleModal()" title="নতুন বিক্রয় (F2)">
+      <span class="fab-ic">🧾</span><span class="fab-label">নতুন বিক্রয়</span><span class="fab-key">F2</span>
+    </button>
+  </div>
+
+<!-- generic modal -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal" id="modalBox"></div>
+</div>
+
+<!-- print area -->
+<div id="printArea"></div>
+
+<!-- অ্যাপের লজিক একাধিক মডিউলে ভাগ করা — নির্ভরতার দিক থেকে এই ক্রমেই লোড হওয়া জরুরি (boot.js সবশেষে, কারণ এটাই bootApp() চালু করে) -->
+<script src="config.js"></script>
+<script src="lib/JsBarcode.code128.min.js"></script>
+<script src="js/core-data.js"></script>
+<script src="js/license.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/stock.js"></script>
+<script src="js/sales.js"></script>
+<script src="js/entry-bar.js"></script>
+<script src="js/purchase.js"></script>
+<script src="js/dues.js"></script>
+<script src="js/expenses.js"></script>
+<script src="js/reports.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/print-share.js"></script>
+<script src="js/cashbook.js"></script>
+<script src="js/returns.js"></script>
+<script src="js/barcode.js"></script>
+<script src="js/holds.js"></script>
+<script src="js/purchase-extra.js"></script>
+<script src="js/boot.js"></script>
+</body>
+</html>
